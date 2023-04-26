@@ -1,3 +1,3 @@
-[submodule "workplace"]
-	path = workplace
-	url = https://github.com/AleksandrasJ/WorkplaceWebService
+[submodule "WorkplaceWebService"]
+	path = WorkplaceWebService
+	url = https://github.com/AleksandrasJ/WorkplaceWebService.git

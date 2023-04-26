@@ -18,7 +18,7 @@ services:
 
   workplace:
     container_name: workplace
-    build: ./workplace
+    build: ./WorkplaceWebService
     ports:
       - "80:80"
     depends_on:
