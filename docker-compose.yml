@@ -1,0 +1,38 @@
+version: '3'
+services:
+
+  plant_shop:
+    container_name: shop
+    build: .
+    ports:
+      - "5000:5000"
+    command: python app.py
+    volumes:
+      - .:/code
+    networks:
+      - my_network
+    depends_on:
+      - mongo
+    environment:
+      - WORKPLACE_URL=http://workplace
+
+  workplace:
+    container_name: workplace
+    build: ./workplace
+    ports:
+      - "80:80"
+    depends_on:
+      - mongo
+    networks:
+      - my_network
+
+  mongo:
+    image: mongo:4.4.6
+    ports:
+      - "27017:27017"
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
