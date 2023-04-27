@@ -14,9 +14,6 @@ class Seller:
         self.surname = seller_surname
         self.workplace_id = None
 
-        # Store it as a dict
-        self.workplace = None
-
     def __dict__(self):
         return {
             'id': self.id,
@@ -24,14 +21,3 @@ class Seller:
             'surname': self.surname,
             'workplace_id': self.workplace_id
         }
-
-    # def set_workplace(self, workplace_id):
-    #     url = f'http://workplace:80/workplaces/{workplace_id}'
-    #     response = requests.get(url)
-    #     if response.status_code == 200:
-    #         workplace_data = response.json()
-    #         self.workplace_id = workplace_id
-    #         self.workplace = workplace_data
-    #         return True
-    #     else:
-    #         return False

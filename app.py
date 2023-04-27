@@ -1,7 +1,7 @@
-import requests
 import plant as pl
 import seller as sl
 import plants_shop as p_shop
+import workplace as wp
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -51,8 +51,30 @@ def show_specific_seller(seller_id):
     if seller is None:
         return jsonify({'message': 'Seller not found'}), 404
 
-    seller_dict = plant_shop.get_seller_dict_by_id(seller_id=seller_id)
-    return jsonify(seller_dict), 200
+    # If seller has no workplace
+    if seller.workplace_id is None:
+        return jsonify(seller.__dict__()), 200
+
+    # Try to receive a workplace from other service
+    workplace = wp.get_workplace(seller.workplace_id)
+
+    if workplace is None:
+        # Should never happen
+        return jsonify({'message': 'Workplace not found'}), 404
+
+    # If error occured while trying to get response from workplace service
+    # if 'error' in workplace:
+    #     return jsonify(workplace), 503
+        # return jsonify(seller.__dict__()), 200
+
+    response = {
+        'id': seller.id,
+        'name': seller.name,
+        'surname': seller.surname,
+        'workplace_id': seller.workplace_id,
+        'workplace': workplace,
+    }
+    return jsonify(response), 200
 
 
 @app.get('/plants/<int:plant_id>/sellers')
@@ -82,7 +104,34 @@ def show_plant_specific_seller(plant_id, seller_id):
     sellers_dict = plant_dict['sellers']
     for seller in sellers_dict:
         if seller['id'] == seller_id:
-            return jsonify(seller)
+
+            # Regain object from instead of dict
+            seller = plant_shop.get_seller_by_id(seller_id)
+
+            # If seller has no workplace
+            if seller.workplace_id is None:
+                return jsonify(seller.__dict__()), 200
+
+            # Try to receive a workplace from other service
+            workplace = wp.get_workplace(seller.workplace_id)
+
+            if workplace is None:
+                # Should never happen
+                return jsonify({'message': 'Workplace not found'}), 404
+
+            # If error occured while trying to get response from workplace service
+            # if 'error' in workplace:
+            #     return jsonify(workplace), 503
+                # return jsonify(seller.__dict__()), 200
+
+            response = {
+                'id': seller.id,
+                'name': seller.name,
+                'surname': seller.surname,
+                'workplace_id': seller.workplace_id,
+                'workplace': workplace,
+            }
+            return jsonify(response), 200
 
     return jsonify({'message': 'Seller not found for this plant'}), 404
 
@@ -122,24 +171,99 @@ def add_plant():
 
 @app.post('/sellers')
 def add_seller():
+    # 1 option: add seller by name/surname (workplace_id automatically null and id sets automatically)
+    # 2 option: add seller by name/surname and json has id (same as 1, ignore id)
+    # 3 option add seller by name/surname/wp_id (id sets automatically, workplace field set by function)
+    # 4 option same as option, just ignore id
+    # 5 option add seller by name/surname and workplace as new resource (fields from workplace service)
+    # 6 option same as 5, ignore id
+
     data = request.get_json()
-    if len(data) == 3 and 'id' in data:
+    # Remove seller id from request body
+    if 'id' in data:
         del data['id']
 
     # Check if JSON object contains the required fields
+    # 'name' and 'surname' always must be in request body
     if not all(field in data for field in ['name', 'surname']):
         return jsonify({'error': 'Name and surname fields are required.'}), 400
 
+    # Create new seller
     new_seller = sl.Seller(data['name'], data['surname'])
-    plant_shop.sellers.append(new_seller)
 
-    # Return a JSON response containing information about the newly created seller
-    response_data = {
-        'id': new_seller.id,
-        'name': new_seller.name,
-        'surname': new_seller.surname
-    }
-    return jsonify(response_data), 201, {"location": f"/sellers/{new_seller.id}"}
+    # If only name/surname given
+    if len(data) == 2:
+        # Seller can be appended immediatily
+        plant_shop.sellers.append(new_seller)
+        response_data = {
+            'id': new_seller.id,
+            'name': new_seller.name,
+            'surname': new_seller.surname
+        }
+        return jsonify(response_data), 201, {"location": f"/sellers/{new_seller.id}"}
+
+    # If 'workplace_id' is found in request body
+    if len(data) == 3 and 'workplace_id' in data:
+        workplace = wp.get_workplace(data['workplace_id'])
+
+        # Check if workplace exists with given id
+        if workplace is None:
+            return jsonify({"error": "Workplace not found by given id"}), 404
+
+        # If error occured while trying to get response from workplace service
+        if 'error' in workplace:
+            return jsonify(workplace), 503
+
+        # Set workplace id
+        new_seller.workplace_id = data['workplace_id']
+        plant_shop.sellers.append(new_seller)
+        response_data = {
+            'id': new_seller.id,
+            'name': new_seller.name,
+            'surname': new_seller.surname,
+            'workplace_id': new_seller.workplace_id
+        }
+        return jsonify(response_data), 201, {"location": f"/sellers/{new_seller.id}"}
+
+    # If 'workplace' is found in request body
+    if len(data) == 3 and 'workplace' in data:
+
+        # Check if 'workplace' is dict
+        if type(data['workplace']) is not dict:
+            return jsonify({'error': 'Field workplace is not dictionary type'}), 400
+
+        # Check if JSON object contains the required fields
+        if not all(field in data['workplace'] for field in ['companyName', 'description',
+                                                            'industry', 'website', 'specialities']):
+            return jsonify({'error': 'Some fields are missing to create new workplace'}), 400
+
+        # data['workplace'] must be made exactly from 5 keys
+        if len(data['workplace']) == 5:
+            new_workplace = wp.create_workplace(data['workplace'])
+
+            if new_workplace is None:
+                # Should never happen
+                return jsonify({'message': 'Workplace cant be created'}), 400
+
+            # If error occured while trying to get response from workplace service
+            if 'error' in new_workplace:
+                return jsonify(new_workplace), 503
+
+            # Set workplace id to new seller
+            new_seller.workplace_id = new_workplace['_id']
+
+            # Make response
+            plant_shop.sellers.append(new_seller)
+            response_data = {
+                'id': new_seller.id,
+                'name': new_seller.name,
+                'surname': new_seller.surname,
+                'workplace_id': new_seller.workplace_id,
+                'workplace': new_workplace
+            }
+            return jsonify(response_data), 201, {"location": f"/sellers/{new_seller.id}"}
+        else:
+            return jsonify({'error': 'Wrong json, not required additional fields found'}), 400
 
 
 @app.post('/plants/<int:plant_id>/sellers')
@@ -159,14 +283,25 @@ def add_seller_to_plant(plant_id):
 
     # Check if seller exists in plant's sellers list
     if plant.find_seller(data['id']):
-        message = "Bad request, seller already exists on plant's sellers list"
+        message = "Bad request, seller already exists on plant's sellers list with given id"
         return jsonify({"error": message}), 400
 
     # Check if seller exists in plant_shop.sellers
     seller = plant_shop.get_seller_by_id(data['id'])
-    if not seller or seller.name != data['name'] or seller.surname != data['surname']:
-        message = "Seller not found"
-        return jsonify({"error": message}), 404
+
+    # If no workplace id provided in request body:
+    if len(data) == 3:
+        if not seller or seller.name != data['name'] or seller.surname != data['surname']:
+            message = "Seller not found"
+            return jsonify({"error": message}), 404
+    elif len(data) == 4:
+        if not seller or seller.name != data['name'] or seller.surname != data['surname']\
+                or seller.workplace_id != data['workplace_id']:
+            message = "Seller not found"
+            return jsonify({"error": message}), 404
+    else:
+        message = "Request body json is not correct, more fields than required"
+        return jsonify({"error": message}), 400
 
     # Add seller to plant's sellers list
     plant.sellers.append(seller)
@@ -226,27 +361,46 @@ def update_plant(plant_id):
 def update_seller(seller_id):
     data = request.get_json()
 
-    # Check if id is provided in json
-    # And check if id in json is matching with id from argument seller_id
-    if len(data) == 3 and 'id' in data:
+    # Remove seller id from request body
+    if 'id' in data:
         if data['id'] != seller_id:
             message = "Bad request, ids are not matching"
             return jsonify({"error": message}), 400
         del data['id']
 
     # Validation
-    if len(data) != 2 or 'name' not in data or 'surname' not in data:
+    if len(data) != 3 or 'name' not in data or 'surname' not in data or 'workplace_id' not in data:
         message = "Bad request, incorrect seller object given"
         return jsonify({"error": message}), 400
 
     # Get seller by id
     seller = plant_shop.get_seller_by_id(seller_id)
 
+    # Deal with workplace id
+    if data['workplace_id'] is not None:
+        # Workplace service stuff
+        workplace = wp.get_workplace(data['workplace_id'])
+
+        # Check if workplace exists with given id
+        if workplace is None:
+            return jsonify({"error": "Workplace not found by given id"}), 404
+
+        # If error occured while trying to get response from workplace service
+        if 'error' in workplace:
+            return jsonify(workplace), 503
+        workplace_id = data['workplace_id']
+    else:
+        workplace_id = None
+
     # If new seller is added
     if seller is None:
         # Append new seller to the list
         new_seller = sl.Seller(data['name'], data['surname'])
         new_seller.id = seller_id
+
+        # Update workplace id
+        new_seller.workplace_id = workplace_id
+
         plant_shop.sellers.append(new_seller)
         # If id in endpoint was higher than current static seller id
         if new_seller.id > sl.Seller.static_seller_id:
@@ -257,12 +411,21 @@ def update_seller(seller_id):
         # Update existing seller
         seller.name = data['name']
         seller.surname = data['surname']
+        # Update workplace id
+        seller.workplace_id = workplace_id
         return jsonify(data), 200, {"location": f"/sellers/{seller_id}"}
 
 
 @app.put('/plants/<int:plant_id>/sellers/<int:seller_id>')
 def update_plant_seller(plant_id, seller_id):
     data = request.get_json()
+
+    # Remove seller id from request body
+    if 'id' in data:
+        if data['id'] != seller_id:
+            message = "Bad request, seller ids are not matching"
+            return jsonify({"error": message}), 400
+        del data['id']
 
     # Get plant
     plant = plant_shop.get_plant_by_id(plant_id)
@@ -280,13 +443,30 @@ def update_plant_seller(plant_id, seller_id):
         message = "Seller is not found in plant_shop"
         return jsonify({"error": message}), 404
 
-    if len(data) != 2 or 'name' not in data or 'surname' not in data:
+    if len(data) != 3 or 'name' not in data or 'surname' not in data or 'workplace_id' not in data:
         message = "Bad request, incorrect seller object given"
         return jsonify({"error": message}), 400
+
+    # Deal with workplace id
+    if data['workplace_id'] is not None:
+        # Workplace service stuff
+        workplace = wp.get_workplace(data['workplace_id'])
+
+        # Check if workplace exists with given id
+        if workplace is None:
+            return jsonify({"error": "Workplace not found by given id"}), 404
+
+        # If error occured while trying to get response from workplace service
+        if 'error' in workplace:
+            return jsonify(workplace), 503
+        workplace_id = data['workplace_id']
+    else:
+        workplace_id = None
 
     # Update seller in plant's sellers list
     seller.name = data['name']
     seller.surname = data['surname']
+    seller.workplace_id = workplace_id
     return jsonify(data), 200, {"location": f"/plants/{plant_id}/sellers/{seller_id}"}
 
 
@@ -338,214 +518,6 @@ def delete_plant_seller(plant_id, seller_id):
     plant.sellers.remove(seller)
     message = "Seller deleted successfully from plant's sellers list"
     return jsonify({"success": message}), 204, {"location": f"/plants/{plant_id}/sellers/{seller_id}"}
-
-
-# Functions for other service
-WORKPLACE_URL = 'http://workplace/workplaces'
-
-
-def get_workplaces():
-    # Retrieve all workplaces
-    response = requests.get(WORKPLACE_URL)
-
-    # If the request was successful
-    if response.status_code == 200:
-        return response.json()
-    # Else, raise an exception
-    else:
-        raise Exception(f'Request failed with status code {response.status_code}: {response.text}')
-
-
-def get_workplace(workplace_id):
-    # Retrieve all workplace by id
-    response = requests.get(f'{WORKPLACE_URL}/{workplace_id}')
-
-    # If the request was successful
-    if response.status_code == 200:
-        return response.json()
-    # Else, raise an exception
-    else:
-        raise Exception(f'Request failed with status code {response.status_code}: {response.text}')
-
-
-def create_workplace(data):
-    # Create a new workplace with the specified data
-    response = requests.post(WORKPLACE_URL, json=data)
-
-    # If the request was successful
-    if response.status_code == 201:
-        return response.json()
-    # Else, raise an exception
-    else:
-        raise Exception(f'Request failed with status code {response.status_code}: {response.text}')
-
-
-def update_workplace(workplace_id, data):
-    # Update the workplace with the specified ID with the new data
-    response = requests.put(f'{WORKPLACE_URL}/{workplace_id}', json=data)
-
-    # If the request was successful
-    if response.status_code == 200:
-        return response.json()
-    # Else, raise an exception
-    else:
-        raise Exception(f'Request failed with status code {response.status_code}: {response.text}')
-
-
-def delete_workplace(workplace_id):
-    # Delete the workplace with the specified ID
-    response = requests.delete(f'{WORKPLACE_URL}/{workplace_id}')
-    # If the request was successful
-    if response.status_code == 204:
-        return None
-    # Else, raise an exception
-    else:
-        raise Exception(f'Request failed with status code {response.status_code}: {response.text}')
-
-
-# Added functionality to resource 'Seller'
-
-@app.get('/sellers/workplace')
-def get_sellers_workplaces():
-    if not plant_shop.sellers:
-        return jsonify({'message': 'No sellers found'}), 404
-
-    # Make json for every seller
-    sellers_workplaces_dict_list = []
-    for seller in plant_shop.sellers:
-        # Format json
-        response_data = {
-            'id': seller.id,
-            'name': seller.name,
-            'surname': seller.surname,
-            'workplace_id': seller.workplace_id,
-            'workplace': seller.workplace
-        }
-        sellers_workplaces_dict_list.append(response_data)
-
-    return jsonify(sellers_workplaces_dict_list), 200
-
-
-@app.get('/sellers/<int:seller_id>/workplace')
-def get_seller_workplace(seller_id):
-    # Get seller from PlantsShop by id
-    seller = plant_shop.get_seller_by_id(seller_id)
-
-    # Check if seller is found
-    if not seller:
-        return jsonify({'error': 'Seller not found'}), 404
-
-    # Get workplace id
-    workplace_id = seller.workplace_id
-
-    if workplace_id is None:
-        return jsonify({'message': 'Seller is unemployed'}), 200
-
-    # Check if workplace is found
-    if not get_workplace(workplace_id):
-        return jsonify({'error': 'Workplace not found'}), 404
-
-    # Format json
-    response_data = {
-        'id': seller_id,
-        'name': seller.name,
-        'surname': seller.surname,
-        'workplace_id': seller.workplace_id,
-        'workplace': seller.workplace
-    }
-
-    return jsonify(response_data), 200
-
-
-@app.post('/sellers/<int:seller_id>/workplace')
-def add_seller_workplace(seller_id):
-    # Get seller from PlantsShop by id
-    seller = plant_shop.get_seller_by_id(seller_id)
-
-    # Check if seller is found
-    if not seller:
-        return jsonify({'error': 'Seller not found'}), 404
-
-    # Check if seller already has workplace
-    if seller.workplace_id is not None:
-        return jsonify({'error': 'Seller has workplace set'}), 400
-
-    # Get workplace ID from the request body
-    data = request.get_json()
-
-    # If workplace given without id
-    if len(data) != 5 or 'companyName' not in data or 'description' not in data or 'industry' not in data or \
-            'website' not in data or 'specialities' not in data:
-        return jsonify({'error': 'Bad json format given'}), 400
-
-    workplace_data = {
-        'companyName': data['companyName'],
-        'description': data['description'],
-        'industry': data['industry'],
-        'website': data['website'],
-        'specialities': data['specialities']
-    }
-    response = create_workplace(workplace_data)
-    workplace = get_workplace(response['_id'])
-
-    # Assign seller's workplace (dictionary)
-    seller.workplace_id = response['_id']
-    seller.workplace = workplace
-
-    return jsonify({'message': 'Seller workplace assigned successfully'}), 200, \
-           {"location": f"/sellers/{seller_id}/workplace"}
-
-
-@app.put('/sellers/<int:seller_id>/workplace')
-def update_seller_workplace(seller_id):
-    # Get seller from PlantsShop by id
-    seller = plant_shop.get_seller_by_id(seller_id)
-
-    # Check if seller is found
-    if not seller:
-        return jsonify({'error': 'Seller not found'}), 404
-
-    # Get workplace ID from the request body
-    data = request.get_json()
-
-    # Validation
-    if len(data) != 6 or 'id' not in data or 'companyName' not in data or 'description' not in data or \
-            'industry' not in data or 'website' not in data or 'specialities' not in data:
-        return jsonify({'error': 'Bad json format given'}), 400
-
-    workplace_data = {
-        'companyName': data['companyName'],
-        'description': data['description'],
-        'industry': data['industry'],
-        'website': data['website'],
-        'specialities': data['specialities']
-    }
-
-    # Update the workplace
-    workplace = update_workplace(data['id'], workplace_data)
-
-    # Update seller's workplace (dictionary)
-    seller.workplace_id = data['id']
-    seller.workplace = workplace
-
-    return jsonify({'message': 'Seller workplace updated successfully'}), 200, \
-           {"location": f"/sellers/{seller_id}/workplace"}
-
-
-@app.delete('/sellers/<int:seller_id>/workplace')
-def delete_seller_workplace(seller_id):
-    seller = plant_shop.get_seller_by_id(seller_id)
-    if seller is None:
-        message = "Seller is not found"
-        return jsonify({"error": message}), 404
-
-    if seller.workplace_id is None:
-        message = "Seller workplace not found"
-        return jsonify({'error': message}), 404
-
-    seller.workplace_id = None
-    seller.workplace = None
-    return jsonify(''), 204, {"location": f"/sellers/{seller_id}/workplace"}
 
 
 if __name__ == "__main__":

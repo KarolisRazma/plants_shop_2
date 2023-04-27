@@ -1,7 +1,9 @@
 import plant as p
 import seller as s
 
+
 class PlantShop:
+
     def __init__(self):
         # Initial Data
         plant1 = p.Plant("Rose", "Flower")
@@ -13,17 +15,7 @@ class PlantShop:
         seller3 = s.Seller("Name3", "Surname3")
 
         seller1.workplace_id = 1
-        json = {
-            "_id": 1,
-            "companyName": "Teltonika",
-            "description": "Easy Key to IoT",
-            "industry": "Telecommunications",
-            "website": "http://www.teltonika.lt",
-            "specialities": ["Transport telematics", "Integrated solutions", "Fleet management"],
-            "refPositions": "/workplaces/1/positions",
-            "__v": 0
-        }
-        seller1.workplace = json
+        seller3.workplace_id = 3
 
         # Fields
         self.plants = [plant1, plant2, plant3]
