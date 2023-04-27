@@ -32,7 +32,7 @@
 }
 ```
 ### Seller:
-### Add seller without workplace_id
+#### Add seller without workplace_id
 ```
 {
     "id": 200,
